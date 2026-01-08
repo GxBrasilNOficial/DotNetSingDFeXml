@@ -1,2 +1,2 @@
 # DotNetSingDFeXml
-Assinador de Xml de DFe em Dot Net
+Assinador de Xml de DFe em Dot Net Core e Framework.
