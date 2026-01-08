@@ -15,7 +15,6 @@ namespace SingXml
 
         private string _ksPass;
 
-
         private string _error;
         public string error
         {
