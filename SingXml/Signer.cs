@@ -11,7 +11,6 @@ namespace SingXml
         internal static string NFE_ID_ATT_NAME = "Id";
         internal static string REFERENCE_URI = "URI";
 
-
         private string _ksPath;
 
         private string _ksPass;
