@@ -87,7 +87,7 @@ namespace SingXml
             X509Certificate2 certificate = Keys.LoadCertificate(_ksPath, _ksPass);
             if (certificate == null)
             {
-                this._error = "Problems loading the certificate";
+                this._error = "Problemas ao carregar o certificado";
                 return false;
             }
 
@@ -105,7 +105,7 @@ namespace SingXml
 
             if (signatureNodeList.Count == 0)
             {
-                this._error = "Could not find signatures";
+                this._error = "Não foi possível encontrar assinaturas";
                 return false;
             }
 
@@ -118,7 +118,7 @@ namespace SingXml
                     XmlElement element = FindNodeById(doc, NFE_ID_ATT_NAME, uri);
                     if (element == null)
                     {
-                        this._error = "could not find signed element";
+                        this._error = "não foi possível encontrar o elemento assinado";
                         return false;
                     }
                     SignedXml signedXml = new SignedXml(element);
@@ -152,7 +152,7 @@ namespace SingXml
             XmlNodeList nodeList = doc.SelectNodes($"//*[@{name}]");
             if (nodeList == null)
             {
-                this._error = "could not find node by id";
+                this._error = "não foi possível encontrar nó por id";
                 return null;
             }
 
@@ -164,7 +164,7 @@ namespace SingXml
                     return node as XmlElement;
                 }
             }
-            this._error = "could not find node to sign";
+            this._error = "não foi possível encontrar nó para assinar";
             return null;
         }
     }
