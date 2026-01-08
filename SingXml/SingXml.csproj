@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net48</TargetFrameworks>
+    <AssemblyName>SignXml</AssemblyName>
+    <Version>17.4.0</Version>
+    <NoWarn>CA1031, CA1801, SYSLIB0027</NoWarn>
+    <PackageId>SignXml.EO</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Mantido exatamente na versão solicitada -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
+  </ItemGroup>
+
+  <!-- Pacotes/refs específicos por TFM -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <!-- Para .NET Framework a classe SignedXml já vem no assembly System.Security -->
+    <Reference Include="System.Security" />
+  </ItemGroup>
+
+</Project>
