@@ -12,7 +12,6 @@ namespace SingXml
         internal static string REFERENCE_URI = "URI";
 
         private string _ksPath;
-
         private string _ksPass;
 
         private string _error;
