@@ -8,7 +8,8 @@ namespace SingXml
     public class Signer
     {
         internal static string ALGO_ID_C14N_OMIT_COMMENTS = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315";
-        internal static string NFE_ID_ATT_NAME = "Id";
+        public string XML_TAG { get; set; } = "NFe";
+        public string XML_ID_ATT_NAME { get; set; } = "Id";
         internal static string REFERENCE_URI = "URI";
 
         private string _ksPath;
@@ -25,7 +26,6 @@ namespace SingXml
             _ksPath = "";
             _ksPass = "";
             _error = "";
-
         }
 
         public void Init(string keyStorePath, string keyStorePassword)
@@ -39,48 +39,87 @@ namespace SingXml
             return !string.IsNullOrEmpty(_error);
         }
 
-
         public string Sign(string input, string id, string hash)
         {
-            XmlDocument doc = new XmlDocument();
-            doc.PreserveWhitespace = true;
-            doc.XmlResolver = null; //disable parser's DTD reading - security meassure
+            XmlDocument doc = new XmlDocument
+            {
+                PreserveWhitespace = true,
+                XmlResolver = null // disable parser's DTD reading - medida de segurança
+            };
             doc.LoadXml(input);
 
-
-            XmlElement elementToSign = FindNodeById(doc, NFE_ID_ATT_NAME, id);
-
+            XmlElement elementToSign = FindNodeById(doc, XML_ID_ATT_NAME, id);
             if (elementToSign == null)
             {
                 return "";
             }
 
-            SignedXml signedXml = new SignedXml(elementToSign)
+            // Adicionado: assinatura será anexada na tag raiz (NFe) em vez de dentro do elemento assinado
+            XmlElement elementToAddSign = doc.DocumentElement;
+            if (elementToAddSign == null || !string.Equals(elementToAddSign.LocalName, XML_TAG, StringComparison.OrdinalIgnoreCase))
             {
-                SigningKey = Keys.LoadPrivateKey(_ksPath, _ksPass),
-            };
+                // tenta localizar a tag NFe caso a raiz não seja NFe
+                XmlNodeList nfeNodes = doc.GetElementsByTagName(XML_TAG);
+                if (nfeNodes != null && nfeNodes.Count > 0)
+                {
+                    elementToAddSign = nfeNodes[0] as XmlElement;
+                }
+            }
 
-            Reference reference = new Reference
+            // Carrega certificado apenas uma vez por operação
+            X509Certificate2 cert = null;
+            try
             {
-                Uri = "#" + id,
-                DigestMethod = DigestAlgUtil.GetDigest(hash)
-            };
+                cert = Keys.LoadCertificate(_ksPath, _ksPass);
+                if (cert == null)
+                {
+                    this._error = "Problemas ao carregar o certificado";
+                    return "";
+                }
 
-            reference.AddTransform(new XmlDsigEnvelopedSignatureTransform());
-            signedXml.AddReference(reference);
-            signedXml.SignedInfo.SignatureMethod = SignatureAlgUtil.GetSignature(hash);
-            signedXml.SignedInfo.CanonicalizationMethod = ALGO_ID_C14N_OMIT_COMMENTS;
-            signedXml.KeyInfo = CreateKeyInfo();
+                SignedXml signedXml = new SignedXml(elementToSign)
+                {
+                    SigningKey = Keys.LoadPrivateKey(_ksPath, _ksPass)
+                };
 
-            signedXml.ComputeSignature();
+                Reference reference = new Reference
+                {
+                    Uri = "#" + id,
+                    DigestMethod = DigestAlgUtil.GetDigest(hash)
+                };
 
-            XmlElement xmlDigitalSignature = signedXml.GetXml();
-            elementToSign.AppendChild(doc.ImportNode(xmlDigitalSignature, true));
+                // Adiciona o transform enveloped e o transform de canonicalização inclusiva (esperado pela SEFAZ)
+                reference.AddTransform(new XmlDsigEnvelopedSignatureTransform());
+                reference.AddTransform(new XmlDsigC14NTransform());
 
+                signedXml.AddReference(reference);
+                signedXml.SignedInfo.SignatureMethod = SignatureAlgUtil.GetSignature(hash);
 
-            return doc.OuterXml;
+                // Use canonicalização inclusiva — correspondente ao transform adicionado e ao que a SEFAZ espera
+                signedXml.SignedInfo.CanonicalizationMethod = ALGO_ID_C14N_OMIT_COMMENTS;
+                signedXml.KeyInfo = CreateKeyInfo(cert);
+
+                signedXml.ComputeSignature();
+
+                XmlElement xmlDigitalSignature = signedXml.GetXml();
+
+                if (elementToAddSign == null)
+                {
+                    // fallback: anexar onde o Cris originalmente fez (elemento assinado)
+                    elementToSign.AppendChild(doc.ImportNode(xmlDigitalSignature, true));
+                }
+                else
+                {
+                    elementToAddSign.AppendChild(doc.ImportNode(xmlDigitalSignature, true));
+                }
+
+                return doc.OuterXml;
+            }
+            finally
+            {
+                cert?.Dispose();
+            }
         }
-
 
         public bool Verify(string input)
         {
@@ -91,56 +130,98 @@ namespace SingXml
                 return false;
             }
 
-
-            XmlDocument doc = new XmlDocument();
-            doc.PreserveWhitespace = true;
-            doc.XmlResolver = null; //disable parser's DTD reading - security meassure
-            doc.LoadXml(input);
-
-            XmlNodeList signatureNodeList = doc.GetElementsByTagName("Signature");
-            if (signatureNodeList.Count == 0)
+            try
             {
-                signatureNodeList = doc.GetElementsByTagName("ds:Signature");
-            }
-
-            if (signatureNodeList.Count == 0)
-            {
-                this._error = "Não foi possível encontrar assinaturas";
-                return false;
-            }
-
-            foreach (XmlNode node in signatureNodeList)
-            {
-                try
+                XmlDocument doc = new XmlDocument
                 {
-                    XmlElement signature = node as XmlElement;
-                    string uri = signature.SelectNodes($"//*[@{REFERENCE_URI}]").Item(0).Attributes[REFERENCE_URI].Value.Replace("#", "").Trim();
-                    XmlElement element = FindNodeById(doc, NFE_ID_ATT_NAME, uri);
-                    if (element == null)
-                    {
-                        this._error = "não foi possível encontrar o elemento assinado";
-                        return false;
-                    }
-                    SignedXml signedXml = new SignedXml(element);
-                    signedXml.LoadXml(signature);
-                    if (!signedXml.CheckSignature(certificate, true))
-                    {
-                        return false;
-                    }
+                    PreserveWhitespace = true,
+                    XmlResolver = null // disable parser's DTD reading - medida de segurança
+                };
+                doc.LoadXml(input);
+
+                XmlNodeList signatureNodeList = doc.GetElementsByTagName("Signature");
+                if (signatureNodeList.Count == 0)
+                {
+                    signatureNodeList = doc.GetElementsByTagName("ds:Signature");
                 }
-                catch (Exception ex)
+
+                if (signatureNodeList.Count == 0)
                 {
-                    this._error = ex.ToString();
+                    this._error = "Não foi possível encontrar assinaturas";
                     return false;
                 }
+
+                foreach (XmlNode node in signatureNodeList)
+                {
+                    try
+                    {
+                        XmlElement signature = node as XmlElement;
+                        if (signature == null)
+                        {
+                            this._error = "Nó de assinatura inválido";
+                            return false;
+                        }
+
+                        // Busca mais robusta pela URI do Reference dentro da Signature
+                        string uri = null;
+                        XmlNodeList referenceNodes = signature.GetElementsByTagName("Reference");
+                        if (referenceNodes != null && referenceNodes.Count > 0)
+                        {
+                            XmlElement refEl = referenceNodes[0] as XmlElement;
+                            if (refEl != null && refEl.HasAttribute(REFERENCE_URI))
+                            {
+                                uri = refEl.GetAttribute(REFERENCE_URI).Replace("#", "").Trim();
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(uri))
+                        {
+                            // fallback para busca global (compatibilidade)
+                            XmlNode uriNode = signature.SelectSingleNode($"//*[@{REFERENCE_URI}]");
+                            if (uriNode?.Attributes?[REFERENCE_URI] != null)
+                            {
+                                uri = uriNode.Attributes[REFERENCE_URI].Value.Replace("#", "").Trim();
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(uri))
+                        {
+                            this._error = "Não foi possível localizar URI da referência na assinatura";
+                            return false;
+                        }
+
+                        XmlElement element = FindNodeById(doc, XML_ID_ATT_NAME, uri);
+                        if (element == null)
+                        {
+                            this._error = "Não foi possível encontrar o elemento assinado";
+                            return false;
+                        }
+
+                        SignedXml signedXml = new SignedXml(element);
+                        signedXml.LoadXml(signature);
+                        if (!signedXml.CheckSignature(certificate, true))
+                        {
+                            this._error = "Assinatura inválida";
+                            return false;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        this._error = ex.ToString();
+                        return false;
+                    }
+                }
+                return true;
             }
-            return true;
+            finally
+            {
+                certificate.Dispose();
+            }
         }
 
-        private KeyInfo CreateKeyInfo()
+        private KeyInfo CreateKeyInfo(X509Certificate2 x509Certificate)
         {
             KeyInfo keyInfo = new KeyInfo();
-            X509Certificate2 x509Certificate = Keys.LoadCertificate(this._ksPath, this._ksPass);
             KeyInfoX509Data keyInfoX509Data = new KeyInfoX509Data();
             keyInfoX509Data.AddCertificate(x509Certificate);
             keyInfo.AddClause((KeyInfoClause)keyInfoX509Data);
@@ -149,23 +230,31 @@ namespace SingXml
 
         private XmlElement FindNodeById(XmlDocument doc, string name, string value)
         {
-            XmlNodeList nodeList = doc.SelectNodes($"//*[@{name}]");
-            if (nodeList == null)
+            // Mantive pesquisa por atributo, mas mais eficiente: selecionar apenas nós cujo atributo tem o valor exato
+            XmlNode node = doc.SelectSingleNode($"//*[@{name}='{value}']");
+            if (node == null)
             {
-                this._error = "não foi possível encontrar nó por id";
+                // fallback para compatibilidade com documentos peculiares
+                XmlNodeList nodeList = doc.SelectNodes($"//*[@{name}]");
+                if (nodeList == null || nodeList.Count == 0)
+                {
+                    this._error = "Não foi possível encontrar nó por id";
+                    return null;
+                }
+
+                foreach (XmlNode n in nodeList)
+                {
+                    if (n.Attributes?[name]?.Value == value)
+                    {
+                        return n as XmlElement;
+                    }
+                }
+
+                this._error = "Não foi possível encontrar nó para assinar";
                 return null;
             }
 
-            foreach (XmlNode node in nodeList)
-            {
-                string esto = node.Attributes[name]?.Value;
-                if (node.Attributes[name]?.Value == value)
-                {
-                    return node as XmlElement;
-                }
-            }
-            this._error = "não foi possível encontrar nó para assinar";
-            return null;
+            return node as XmlElement;
         }
     }
 }
